@@ -7,6 +7,7 @@ const rateLimit = require('express-rate-limit');
 // Import routes
 const authRoutes = require('./routes/auth');
 const preferencesRoutes = require('./routes/preferences');
+const teamsRoutes = require('./routes/teams');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -49,6 +50,7 @@ app.get('/health', (req, res) => {
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/preferences', preferencesRoutes);
+app.use('/api/teams', teamsRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {

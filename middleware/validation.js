@@ -14,9 +14,7 @@ const schemas = {
   }),
 
   favoriteTeam: Joi.object({
-    team_id: Joi.string().required(),
-    team_name: Joi.string().required(),
-    team_logo: Joi.string().uri().optional()
+    team_id: Joi.string().uuid().required()
   }),
 
   favoritePlayer: Joi.object({

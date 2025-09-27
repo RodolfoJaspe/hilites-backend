@@ -12,7 +12,28 @@ router.get('/teams', authenticateUser, async (req, res) => {
 
     const { data, error } = await supabase
       .from('user_favorite_teams')
-      .select('*')
+      .select(`
+        *,
+        teams:team_id (
+          id,
+          external_id,
+          name,
+          short_name,
+          code,
+          country,
+          country_code,
+          league,
+          league_id,
+          continental_confederation,
+          founded_year,
+          venue_name,
+          venue_city,
+          venue_capacity,
+          logo_url,
+          website_url,
+          is_active
+        )
+      `)
       .eq('user_id', userId)
       .order('created_at', { ascending: false });
 
@@ -39,7 +60,21 @@ router.get('/teams', authenticateUser, async (req, res) => {
 router.post('/teams', authenticateUser, validateRequest(schemas.favoriteTeam), async (req, res) => {
   try {
     const userId = req.user.id;
-    const { team_id, team_name, team_logo } = req.body;
+    const { team_id } = req.body;
+
+    // First, verify that the team exists in the teams table
+    const { data: teamExists, error: teamError } = await supabase
+      .from('teams')
+      .select('id, name')
+      .eq('id', team_id)
+      .single();
+
+    if (teamError || !teamExists) {
+      return res.status(404).json({
+        error: 'Team not found',
+        message: 'The specified team does not exist'
+      });
+    }
 
     // Check if team is already favorited
     const { data: existingTeam } = await supabase
@@ -60,11 +95,30 @@ router.post('/teams', authenticateUser, validateRequest(schemas.favoriteTeam), a
       .from('user_favorite_teams')
       .insert({
         user_id: userId,
-        team_id,
-        team_name,
-        team_logo
+        team_id
       })
-      .select()
+      .select(`
+        *,
+        teams:team_id (
+          id,
+          external_id,
+          name,
+          short_name,
+          code,
+          country,
+          country_code,
+          league,
+          league_id,
+          continental_confederation,
+          founded_year,
+          venue_name,
+          venue_city,
+          venue_capacity,
+          logo_url,
+          website_url,
+          is_active
+        )
+      `)
       .single();
 
     if (error) {
@@ -92,6 +146,15 @@ router.delete('/teams/:teamId', authenticateUser, async (req, res) => {
   try {
     const userId = req.user.id;
     const { teamId } = req.params;
+
+    // Validate that teamId is a valid UUID
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(teamId)) {
+      return res.status(400).json({
+        error: 'Invalid team ID',
+        message: 'Team ID must be a valid UUID'
+      });
+    }
 
     const { error } = await supabase
       .from('user_favorite_teams')
@@ -241,7 +304,28 @@ router.get('/', authenticateUser, async (req, res) => {
     const [teamsResult, playersResult] = await Promise.all([
       supabase
         .from('user_favorite_teams')
-        .select('*')
+        .select(`
+          *,
+          teams:team_id (
+            id,
+            external_id,
+            name,
+            short_name,
+            code,
+            country,
+            country_code,
+            league,
+            league_id,
+            continental_confederation,
+            founded_year,
+            venue_name,
+            venue_city,
+            venue_capacity,
+            logo_url,
+            website_url,
+            is_active
+          )
+        `)
         .eq('user_id', userId)
         .order('created_at', { ascending: false }),
       supabase
