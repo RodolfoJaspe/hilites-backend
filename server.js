@@ -9,9 +9,12 @@ const authRoutes = require('./routes/auth');
 const preferencesRoutes = require('./routes/preferences');
 const teamsRoutes = require('./routes/teams');
 const highlightsRoutes = require('./routes/highlights');
+const matchesRoutes = require('./routes/matches');
+const aiDiscoveryRoutes = require('./routes/ai-discovery');
+const multiSourceMatchesRoutes = require('./routes/multi-source-matches');
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 3001;
 
 // Security middleware
 app.use(helmet());
@@ -27,14 +30,16 @@ app.use(cors({
   optionsSuccessStatus: 200 // For legacy browser support
 }));
 
-// Rate limiting
+// Rate limiting - More lenient for development
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
+  max: process.env.NODE_ENV === 'production' ? 100 : 1000, // More lenient in development
   message: {
     error: 'Too many requests',
     message: 'Too many requests from this IP, please try again later.'
-  }
+  },
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
 });
 app.use(limiter);
 
@@ -56,6 +61,9 @@ app.use('/api/auth', authRoutes);
 app.use('/api/preferences', preferencesRoutes);
 app.use('/api/teams', teamsRoutes);
 app.use('/api/highlights', highlightsRoutes);
+app.use('/api/matches', matchesRoutes);
+app.use('/api/ai-discovery', aiDiscoveryRoutes);
+app.use('/api/multi-source-matches', multiSourceMatchesRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {
