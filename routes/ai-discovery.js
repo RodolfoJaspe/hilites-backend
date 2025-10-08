@@ -67,6 +67,17 @@ router.post('/process', async (req, res) => {
     });
   } catch (error) {
     console.error('Error in AI video discovery process:', error.message);
+    
+    // Check if it's a YouTube quota error
+    if (error.message.includes('YouTube API quota exceeded')) {
+      return res.status(429).json({
+        success: false,
+        error: 'YouTube API quota exceeded',
+        message: 'The YouTube API daily quota has been exceeded. Highlights will be available again tomorrow. Please check back later.',
+        retryAfter: '24 hours'
+      });
+    }
+    
     res.status(500).json({
       success: false,
       error: 'Failed to process AI video discovery',
@@ -265,6 +276,29 @@ router.get('/highlights/:matchId', async (req, res) => {
       .order('relevance_score', { ascending: false });
 
     if (error) throw error;
+
+    // Check if there are processing errors logged for this match
+    const { data: logs } = await supabase
+      .from('ai_processing_logs')
+      .select('*')
+      .eq('match_id', matchId)
+      .eq('status', 'error')
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    // If there are recent errors indicating quota exceeded
+    if (logs && logs.length > 0) {
+      const latestLog = logs[0];
+      if (latestLog.error_message && latestLog.error_message.includes('YouTube API quota exceeded')) {
+        return res.status(429).json({
+          success: false,
+          error: 'YouTube API quota exceeded',
+          message: 'The YouTube API daily quota has been exceeded. Highlights will be available again tomorrow.',
+          data: [],
+          count: 0
+        });
+      }
+    }
 
     res.json({
       success: true,
