@@ -195,48 +195,85 @@ class MatchDataService {
    */
   async getOrCreateTeam(teamData) {
     if (!teamData || !teamData.id) {
+      console.error('Invalid team data provided:', teamData);
       return null;
     }
 
+    const externalId = teamData.id.toString();
+    const teamName = teamData.name || 'Unknown Team';
+
     try {
-      // First, try to find existing team
+      // First, try to find existing team by external_id
       const { data: existingTeam, error: findError } = await this.supabase
         .from('teams')
         .select('id')
-        .eq('external_id', teamData.id.toString())
-        .single();
+        .eq('external_id', externalId)
+        .maybeSingle();
 
-      if (existingTeam && !findError) {
+      if (findError) {
+        console.error(`Error finding team ${teamName}:`, findError.message);
+        // Continue to try creating the team
+      }
+
+      if (existingTeam) {
         return existingTeam.id;
       }
 
-      // Create new team if not found
+      // Team not found, create new team
+      const newTeamData = {
+        external_id: externalId,
+        name: teamName,
+        short_name: teamData.shortName || teamData.name || teamName,
+        code: teamData.tla || null,
+        country: teamData.area?.name || 'Unknown',
+        country_code: teamData.area?.code || null,
+        league: 'Unknown', // Will be updated when we have more context
+        logo_url: teamData.crest || null,
+        website_url: teamData.website || null,
+        is_active: true
+      };
+
       const { data: newTeam, error: createError } = await this.supabase
         .from('teams')
-        .insert({
-          external_id: teamData.id.toString(),
-          name: teamData.name,
-          short_name: teamData.shortName || teamData.name,
-          code: teamData.tla || null,
-          country: teamData.area?.name || 'Unknown',
-          country_code: teamData.area?.code || null,
-          league: 'Unknown', // Will be updated when we have more context
-          logo_url: teamData.crest || null,
-          website_url: teamData.website || null,
-          is_active: true
-        })
+        .insert(newTeamData)
         .select('id')
-        .single();
+        .maybeSingle();
 
       if (createError) {
-        console.error('Error creating team:', createError);
+        console.error(`Error creating team ${teamName}:`, createError);
+        
+        // If it's a unique constraint error, try to find the team again
+        // (it might have been created by another process)
+        if (createError.code === '23505') {
+          console.log(`Team ${teamName} already exists, fetching...`);
+          const { data: retryTeam, error: retryError } = await this.supabase
+            .from('teams')
+            .select('id')
+            .eq('external_id', externalId)
+            .maybeSingle();
+          
+          if (retryError) {
+            console.error(`Error retrying team fetch for ${teamName}:`, retryError.message);
+            return null;
+          }
+          
+          if (retryTeam) {
+            return retryTeam.id;
+          }
+        }
+        
         return null;
       }
 
-      console.log(`✅ Created new team: ${teamData.name}`);
+      if (!newTeam) {
+        console.error(`Failed to create team ${teamName}: no data returned`);
+        return null;
+      }
+
+      console.log(`✅ Created new team: ${teamName} (ID: ${newTeam.id})`);
       return newTeam.id;
     } catch (error) {
-      console.error('Error in getOrCreateTeam:', error);
+      console.error(`Error in getOrCreateTeam for ${teamName}:`, error);
       return null;
     }
   }

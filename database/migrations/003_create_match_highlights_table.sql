@@ -50,3 +50,5 @@ COMMENT ON COLUMN match_highlights.relevance_score IS 'AI-calculated relevance s
 COMMENT ON COLUMN match_highlights.quality_score IS 'AI-calculated quality score (0.00-1.00)';
 COMMENT ON COLUMN match_highlights.is_verified IS 'Whether the video has been manually verified';
 COMMENT ON COLUMN match_highlights.is_available IS 'Whether the video is still available on YouTube';
+
+

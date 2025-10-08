@@ -268,3 +268,5 @@ ORDER BY tablename;
 - Partitioning for large tables
 - Materialized views for complex queries
 - Advanced caching strategies
+
+

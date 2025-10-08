@@ -1,6 +1,6 @@
-# Team Data Seeding Scripts
+# Data Management Scripts
 
-This directory contains scripts to populate your teams table with real soccer team data.
+This directory contains scripts to populate and maintain your database with real soccer team and match data.
 
 ## 🚀 Quick Start
 
@@ -196,6 +196,49 @@ To update team data:
    npm run seed:teams
    ```
 
+## 🔧 Maintenance & Utility Scripts
+
+### Add Leagues
+
+Add matches from major European leagues:
+
+```bash
+# Add Serie A, Bundesliga, and Ligue 1
+node scripts/add-remaining-leagues.js
+
+# Add La Liga
+node scripts/add-la-liga.js
+
+# Add Champions League
+node scripts/add-champions-league.js
+
+# Add Europa League
+node scripts/add-europa-league.js
+node scripts/add-recent-europa-league.js
+```
+
+### Fix Data Issues
+
+If you encounter matches showing "N/A" for team names:
+
+```bash
+# Delete matches with missing team data
+node scripts/delete-broken-matches.js
+
+# Clean and re-fetch fresh match data
+node scripts/clean-and-refetch-leagues.js
+```
+
+### Fix Teams
+
+```bash
+# Fix team data issues
+node scripts/fix-teams.js
+
+# Fix La Liga match data
+node scripts/fix-la-liga-matches.js
+```
+
 ## 📝 Notes
 
 - Static data includes major teams from top 5 European leagues
@@ -203,3 +246,5 @@ To update team data:
 - All teams are marked as `is_active = true` by default
 - External IDs are from Football-Data.org for consistency
 - Logo URLs point to Football-Data.org's CDN
+- Use maintenance scripts regularly to ensure data quality
+- The improved `getOrCreateTeam` function handles duplicate team creation gracefully

@@ -29,3 +29,5 @@ CREATE INDEX IF NOT EXISTS idx_competitions_current_season ON competitions(curre
 COMMENT ON TABLE competitions IS 'Stores football competition and league information';
 COMMENT ON COLUMN competitions.type IS 'Type of competition: league, cup, international, friendly';
 COMMENT ON COLUMN competitions.current_season IS 'Current active season identifier';
+
+

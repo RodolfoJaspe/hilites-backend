@@ -107,3 +107,5 @@ SELECT
     (SELECT COUNT(*) FROM pg_indexes WHERE schemaname = 'public') as total_indexes;
 
 \echo 'Database test completed!'
+
+

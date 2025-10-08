@@ -37,3 +37,5 @@ COMMENT ON COLUMN ai_processing_logs.processing_type IS 'Type of AI processing p
 COMMENT ON COLUMN ai_processing_logs.input_data IS 'Input data for the AI processing (JSON)';
 COMMENT ON COLUMN ai_processing_logs.output_data IS 'Output data from the AI processing (JSON)';
 COMMENT ON COLUMN ai_processing_logs.processing_time_ms IS 'Processing time in milliseconds';
+
+

@@ -14,7 +14,7 @@ const aiDiscoveryRoutes = require('./routes/ai-discovery');
 const multiSourceMatchesRoutes = require('./routes/multi-source-matches');
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 5001;
 
 // Security middleware
 app.use(helmet());
@@ -23,7 +23,7 @@ app.use(helmet());
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' 
     ? ['https://hilites.vercel.app'] 
-    : ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:5173'],
+    : ['http://localhost:3000'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],

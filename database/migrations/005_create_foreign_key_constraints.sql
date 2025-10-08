@@ -60,3 +60,5 @@ BEGIN
         FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE;
     END IF;
 END $$;
+
+

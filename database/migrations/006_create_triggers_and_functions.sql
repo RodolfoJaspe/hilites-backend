@@ -110,3 +110,5 @@ COMMENT ON FUNCTION calculate_match_duration(TIMESTAMP WITH TIME ZONE, TIMESTAMP
 COMMENT ON FUNCTION get_best_highlight_for_match(UUID) IS 'Returns the best highlight video for a given match';
 COMMENT ON FUNCTION get_match_stats(UUID) IS 'Returns statistics for a given match';
 COMMENT ON FUNCTION cleanup_old_processing_logs(INTEGER) IS 'Cleans up old processing logs older than specified days';
+
+

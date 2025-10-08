@@ -43,3 +43,5 @@ COMMENT ON COLUMN matches.external_id IS 'External API identifier for the match'
 COMMENT ON COLUMN matches.status IS 'Current status of the match';
 COMMENT ON COLUMN matches.match_week IS 'Week number in the competition';
 COMMENT ON COLUMN matches.season IS 'Season identifier (e.g., 2023-24)';
+
+

@@ -127,3 +127,5 @@ WHERE mh.is_available = true;
 -- Grant access to views
 GRANT SELECT ON public_matches TO anon, authenticated;
 GRANT SELECT ON public_match_highlights TO anon, authenticated;
+
+

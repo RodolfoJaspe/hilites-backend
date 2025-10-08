@@ -111,3 +111,5 @@ UPDATE competitions SET updated_at = NOW() WHERE id IN (
 );
 
 \echo 'Competitions seeded successfully!'
+
+

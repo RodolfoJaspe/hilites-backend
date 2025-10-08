@@ -171,3 +171,5 @@ function getCompetitionFlag(competitionName) {
 
 // Run the script
 addRemainingLeagues().catch(console.error);
+
+
