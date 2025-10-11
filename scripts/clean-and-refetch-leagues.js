@@ -148,3 +148,4 @@ async function cleanAndRefetchLeagues() {
 // Run the script
 cleanAndRefetchLeagues().catch(console.error);
 
+

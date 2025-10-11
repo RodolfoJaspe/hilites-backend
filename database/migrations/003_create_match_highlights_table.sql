@@ -52,3 +52,5 @@ COMMENT ON COLUMN match_highlights.is_verified IS 'Whether the video has been ma
 COMMENT ON COLUMN match_highlights.is_available IS 'Whether the video is still available on YouTube';
 
 
+
+

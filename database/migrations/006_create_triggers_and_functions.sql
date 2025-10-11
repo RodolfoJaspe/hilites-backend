@@ -112,3 +112,5 @@ COMMENT ON FUNCTION get_match_stats(UUID) IS 'Returns statistics for a given mat
 COMMENT ON FUNCTION cleanup_old_processing_logs(INTEGER) IS 'Cleans up old processing logs older than specified days';
 
 
+
+

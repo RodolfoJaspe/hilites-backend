@@ -31,3 +31,5 @@ COMMENT ON COLUMN competitions.type IS 'Type of competition: league, cup, intern
 COMMENT ON COLUMN competitions.current_season IS 'Current active season identifier';
 
 
+
+

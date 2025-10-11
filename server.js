@@ -12,6 +12,7 @@ const highlightsRoutes = require('./routes/highlights');
 const matchesRoutes = require('./routes/matches');
 const aiDiscoveryRoutes = require('./routes/ai-discovery');
 const multiSourceMatchesRoutes = require('./routes/multi-source-matches');
+const favoriteTeamsRoutes = require('./routes/favorite-teams');
 
 const app = express();
 const port = process.env.PORT || 5001;
@@ -64,6 +65,7 @@ app.use('/api/highlights', highlightsRoutes);
 app.use('/api/matches', matchesRoutes);
 app.use('/api/ai-discovery', aiDiscoveryRoutes);
 app.use('/api/multi-source-matches', multiSourceMatchesRoutes);
+app.use('/api/favorite-teams', favoriteTeamsRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {

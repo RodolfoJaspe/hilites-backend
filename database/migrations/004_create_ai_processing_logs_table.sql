@@ -39,3 +39,5 @@ COMMENT ON COLUMN ai_processing_logs.output_data IS 'Output data from the AI pro
 COMMENT ON COLUMN ai_processing_logs.processing_time_ms IS 'Processing time in milliseconds';
 
 
+
+
