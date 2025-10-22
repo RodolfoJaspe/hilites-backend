@@ -102,6 +102,60 @@ router.get('/', async (req, res) => {
   }
 });
 
+// POST /api/matches/refresh-all-sources - Backfill from all sources for the last N days
+router.post('/refresh-all-sources', async (req, res) => {
+  try {
+    console.log('🔄 Multi-source match data backfill requested');
+
+    const { date_range = 7 } = req.body; // Default to 7 days (including today)
+
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(endDate.getDate() - Number(date_range));
+
+    const dateFrom = startDate.toISOString().split('T')[0];
+    const dateTo = endDate.toISOString().split('T')[0];
+
+    console.log(`📅 [All Sources] Backfilling from ${dateFrom} to ${dateTo}`);
+
+    let totalProcessed = 0;
+    const perDay = [];
+
+    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+      const dateStr = d.toISOString().split('T')[0];
+      console.log(`📆 [All Sources] Processing ${dateStr}`);
+      try {
+        const matches = await matchDataService.fetchMatchesByDateAllSources(dateStr);
+        await matchDataService.storeMatches(matches);
+        perDay.push({ date: dateStr, count: matches.length });
+        totalProcessed += matches.length;
+        await new Promise(r => setTimeout(r, 500));
+      } catch (e) {
+        console.error(`❌ [All Sources] Failed ${dateStr}:`, e.message);
+        perDay.push({ date: dateStr, error: e.message });
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Multi-source match data backfill completed',
+      data: {
+        date_range: `${dateFrom} to ${dateTo}`,
+        matches_processed: totalProcessed,
+        per_day: perDay
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Multi-source backfill error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to backfill matches from all sources',
+      message: process.env.NODE_ENV === 'development' ? error.message : 'Unable to backfill at this time'
+    });
+  }
+});
+
 // GET /api/matches/upcoming - Get upcoming matches
 router.get('/upcoming', async (req, res) => {
   try {
@@ -329,28 +383,45 @@ router.post('/refresh', async (req, res) => {
   try {
     console.log('🔄 Manual match data refresh requested');
     
-    const { date_range = 7 } = req.body; // Default to 7 days
-    
+    const { date_range = 7 } = req.body; // Default to 7 days backfill (including today)
+
     // Calculate date range
     const endDate = new Date();
     const startDate = new Date();
-    startDate.setDate(endDate.getDate() - date_range);
-    
+    startDate.setDate(endDate.getDate() - Number(date_range));
+
     const dateFrom = startDate.toISOString().split('T')[0];
     const dateTo = endDate.toISOString().split('T')[0];
 
-    console.log(`📅 Refreshing matches from ${dateFrom} to ${dateTo}`);
+    console.log(`📅 Backfilling matches from ${dateFrom} to ${dateTo}`);
 
-    // Fetch today's matches
-    const todaysMatches = await matchDataService.fetchTodaysMatches();
-    await matchDataService.storeMatches(todaysMatches);
+    let totalProcessed = 0;
+    const perDay = [];
+
+    // Iterate each day from startDate to endDate inclusive
+    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+      const dateStr = d.toISOString().split('T')[0];
+      console.log(`📆 Processing date ${dateStr}`);
+      try {
+        const matches = await matchDataService.fetchMatchesByDate(dateStr);
+        await matchDataService.storeMatches(matches);
+        perDay.push({ date: dateStr, count: matches.length });
+        totalProcessed += matches.length;
+        // small delay to be nice to the upstream API
+        await new Promise(r => setTimeout(r, 500));
+      } catch (e) {
+        console.error(`❌ Failed processing date ${dateStr}:`, e.message);
+        perDay.push({ date: dateStr, error: e.message });
+      }
+    }
 
     res.json({
       success: true,
-      message: 'Match data refresh completed',
+      message: 'Match data backfill completed',
       data: {
         date_range: `${dateFrom} to ${dateTo}`,
-        matches_processed: todaysMatches.length
+        matches_processed: totalProcessed,
+        per_day: perDay
       }
     });
 
@@ -362,6 +433,46 @@ router.post('/refresh', async (req, res) => {
       error: 'Failed to refresh match data',
       message: 'Unable to refresh match data at this time',
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// POST /api/matches/refresh-competition - Backfill a specific competition in a date range
+router.post('/refresh-competition', async (req, res) => {
+  try {
+    const { competition_id, date_from, date_to } = req.body || {};
+
+    if (!competition_id || !date_from || !date_to) {
+      return res.status(400).json({
+        success: false,
+        error: 'Bad request',
+        message: 'competition_id, date_from (YYYY-MM-DD), and date_to (YYYY-MM-DD) are required'
+      });
+    }
+
+    console.log(`🎯 Backfilling competition ${competition_id} from ${date_from} to ${date_to}`);
+
+    // Fetch from upstream
+    const matches = await matchDataService.fetchMatches(competition_id, date_from, date_to);
+    // Store to DB (upsert by external_id)
+    await matchDataService.storeMatches(matches);
+
+    res.json({
+      success: true,
+      message: `Backfill completed for competition ${competition_id}`,
+      data: {
+        competition_id,
+        date_range: `${date_from} to ${date_to}`,
+        matches_processed: matches.length
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Competition backfill error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to backfill competition matches',
+      message: process.env.NODE_ENV === 'development' ? error.message : 'Unable to backfill at this time'
     });
   }
 });

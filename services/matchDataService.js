@@ -21,6 +21,114 @@ class MatchDataService {
   }
 
   /**
+   * Map API-Football status to our schema
+   */
+  mapApiFootballStatus(status) {
+    const s = (status || '').toUpperCase();
+    const map = {
+      'TBD': 'scheduled',
+      'NS': 'scheduled',
+      '1H': 'live',
+      'HT': 'live',
+      '2H': 'live',
+      'ET': 'live',
+      'BT': 'live',
+      'P': 'live',
+      'SUSP': 'postponed',
+      'INT': 'postponed',
+      'FT': 'finished',
+      'AET': 'finished',
+      'PEN': 'finished',
+      'PST': 'postponed',
+      'CANC': 'cancelled',
+      'ABD': 'cancelled',
+      'AWD': 'finished',
+      'WO': 'finished',
+      'LIVE': 'live'
+    };
+    return map[s] || 'scheduled';
+  }
+
+  /**
+   * Fetch matches for a specific date from API-Football and normalize
+   */
+  async fetchMatchesByDateApiFootball(dateStr) {
+    try {
+      const date = dateStr || new Date().toISOString().split('T')[0];
+      console.log(`📅 [API-Football] Fetching fixtures for ${date}...`);
+
+      const data = await this.makeApiFootballRequest('/fixtures', { date });
+      const fixtures = Array.isArray(data?.response) ? data.response : [];
+
+      const matches = await Promise.all(
+        fixtures.map(async (fx) => {
+          const fixture = fx.fixture || {};
+          const league = fx.league || {};
+          const teams = fx.teams || {};
+          const goals = fx.goals || {};
+
+          // Build synthetic team objects compatible with getOrCreateTeam()
+          const homeTeamObj = {
+            id: teams.home?.id,
+            name: teams.home?.name,
+            shortName: teams.home?.name,
+            tla: null,
+            area: { name: league.country, code: null },
+            crest: teams.home?.logo
+          };
+          const awayTeamObj = {
+            id: teams.away?.id,
+            name: teams.away?.name,
+            shortName: teams.away?.name,
+            tla: null,
+            area: { name: league.country, code: null },
+            crest: teams.away?.logo
+          };
+
+          return {
+            // Prefix to avoid collision with Football-Data IDs
+            external_id: `af-${fixture.id}`,
+            home_team_id: await this.getOrCreateTeam(homeTeamObj),
+            away_team_id: await this.getOrCreateTeam(awayTeamObj),
+            competition_id: league.code || String(league.id || ''),
+            competition_name: league.name || 'Unknown',
+            match_date: new Date(fixture.date).toISOString(),
+            status: this.mapApiFootballStatus(fixture.status?.short),
+            home_score: typeof goals.home === 'number' ? goals.home : null,
+            away_score: typeof goals.away === 'number' ? goals.away : null,
+            venue: fixture.venue?.name || null,
+            referee: fixture.referee || null,
+            weather_conditions: null,
+            attendance: null,
+            match_week: league.round || null,
+            season: league.season ? String(league.season) : null
+          };
+        })
+      );
+
+      console.log(`✅ [API-Football] Fetched ${matches.length} fixtures for ${date}`);
+      return matches;
+    } catch (error) {
+      console.error(`❌ [API-Football] Error fetching fixtures for ${dateStr}:`, error.message);
+      // Return empty list on failure so other sources can still proceed
+      return [];
+    }
+  }
+
+  /**
+   * Fetch matches for a specific date from all sources and merge
+   */
+  async fetchMatchesByDateAllSources(dateStr) {
+    const fdMatches = await this.fetchMatchesByDate(dateStr).catch(() => []);
+    const afMatches = await this.fetchMatchesByDateApiFootball(dateStr).catch(() => []);
+
+    // Simple merge; IDs are namespaced (FD vs AF), so no conflict on upsert
+    const combined = [...fdMatches, ...afMatches];
+    console.log(`🔀 Combined matches for ${dateStr}: FD=${fdMatches.length}, AF=${afMatches.length}, Total=${combined.length}`);
+    return combined;
+  }
+
+  /**
    * Check if we can make a request based on rate limits
    */
   canMakeRequest() {
@@ -186,6 +294,44 @@ class MatchDataService {
       return matches;
     } catch (error) {
       console.error('❌ Error fetching today\'s matches:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Fetch matches for a specific date (YYYY-MM-DD) across all competitions
+   */
+  async fetchMatchesByDate(dateStr) {
+    try {
+      const date = dateStr || new Date().toISOString().split('T')[0];
+      console.log(`📅 Fetching matches for ${date}...`);
+
+      const data = await this.makeFootballDataRequest(`/matches?date=${date}`);
+
+      const matches = await Promise.all(
+        data.matches.map(async (match) => ({
+          external_id: match.id.toString(),
+          home_team_id: await this.getOrCreateTeam(match.homeTeam),
+          away_team_id: await this.getOrCreateTeam(match.awayTeam),
+          competition_id: match.competition?.code || match.competition?.id?.toString(),
+          competition_name: match.competition?.name || 'Unknown',
+          match_date: new Date(match.utcDate).toISOString(),
+          status: this.mapMatchStatus(match.status),
+          home_score: match.score?.fullTime?.home || null,
+          away_score: match.score?.fullTime?.away || null,
+          venue: match.venue || null,
+          referee: match.referees?.[0]?.name || null,
+          weather_conditions: null,
+          attendance: match.attendance || null,
+          match_week: match.matchday || null,
+          season: this.extractSeason(match.season?.startDate)
+        }))
+      );
+
+      console.log(`✅ Fetched ${matches.length} matches for ${date}`);
+      return matches;
+    } catch (error) {
+      console.error(`❌ Error fetching matches for date ${dateStr}:`, error.message);
       throw error;
     }
   }

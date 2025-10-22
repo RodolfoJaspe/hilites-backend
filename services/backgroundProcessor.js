@@ -54,8 +54,17 @@ class BackgroundProcessor {
     try {
       console.log('📅 Fetching today\'s matches...');
       
-      const todaysMatches = await this.matchDataService.fetchTodaysMatches();
-      
+      // Prefer multi-source ingestion (Football-Data + API-Football),
+      // fallback to Football-Data-only if multi-source fails.
+      const today = new Date().toISOString().split('T')[0];
+      let todaysMatches = [];
+      try {
+        todaysMatches = await this.matchDataService.fetchMatchesByDateAllSources(today);
+      } catch (e) {
+        console.warn('⚠️ Multi-source fetch failed, falling back to Football-Data-only:', e.message);
+        todaysMatches = await this.matchDataService.fetchTodaysMatches();
+      }
+
       if (todaysMatches.length > 0) {
         await this.matchDataService.storeMatches(todaysMatches);
         console.log(`✅ Stored ${todaysMatches.length} matches for today`);

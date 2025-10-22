@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const BackgroundProcessor = require('./services/backgroundProcessor');
 
 // Import routes
 const authRoutes = require('./routes/auth');
@@ -16,6 +17,7 @@ const favoriteTeamsRoutes = require('./routes/favorite-teams');
 
 const app = express();
 const port = process.env.PORT || 5001;
+const backgroundIntervalMs = parseInt(process.env.BACKGROUND_INTERVAL_MS || '300000', 10); // default 5 minutes
 
 // Security middleware
 app.use(helmet());
@@ -67,6 +69,18 @@ app.use('/api/ai-discovery', aiDiscoveryRoutes);
 app.use('/api/multi-source-matches', multiSourceMatchesRoutes);
 app.use('/api/favorite-teams', favoriteTeamsRoutes);
 
+// Background processing status endpoint (optional lightweight health for processor)
+app.get('/api/background/status', (req, res) => {
+  try {
+    if (!app.locals.backgroundProcessor) {
+      return res.json({ is_processing: false, last_processed: null, uptime: process.uptime() });
+    }
+    return res.json(app.locals.backgroundProcessor.getStatus());
+  } catch (e) {
+    return res.status(500).json({ error: 'Failed to get background status' });
+  }
+});
+
 // 404 handler
 app.use('*', (req, res) => {
   res.status(404).json({
@@ -91,4 +105,20 @@ app.listen(port, () => {
   console.log(`🚀 Hilites Backend Server is running on port ${port}`);
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🔗 Health check: http://localhost:${port}/health`);
+
+  // Initialize and schedule background processing
+  const processor = new BackgroundProcessor();
+  app.locals.backgroundProcessor = processor;
+
+  // Kick off immediately on server start
+  processor.processNewMatches().catch((err) => {
+    console.error('Initial background processing failed:', err.message);
+  });
+
+  // Schedule periodic processing
+  setInterval(() => {
+    processor.processNewMatches().catch((err) => {
+      console.error('Scheduled background processing failed:', err.message);
+    });
+  }, backgroundIntervalMs);
 });
