@@ -4,9 +4,7 @@ const { createClient } = require('@supabase/supabase-js');
 class MatchDataService {
   constructor() {
     this.footballDataApiKey = process.env.FOOTBALL_DATA_API_KEY;
-    this.apiFootballKey = process.env.API_FOOTBALL_KEY;
     this.baseUrl = 'https://api.football-data.org/v4';
-    this.apiFootballUrl = 'https://v3.football.api-sports.io';
     
     // Initialize Supabase client
     this.supabase = createClient(
@@ -18,242 +16,43 @@ class MatchDataService {
     this.requestCount = 0;
     this.lastReset = Date.now();
     this.maxRequestsPerMinute = 10; // Football-Data.org free tier limit
-  }
-
-  /**
-   * Map API-Football status to our schema
-   */
-  mapApiFootballStatus(status) {
-    const s = (status || '').toUpperCase();
-    const map = {
-      'TBD': 'scheduled',
-      'NS': 'scheduled',
-      '1H': 'live',
-      'HT': 'live',
-      '2H': 'live',
-      'ET': 'live',
-      'BT': 'live',
-      'P': 'live',
-      'SUSP': 'postponed',
-      'INT': 'postponed',
-      'FT': 'finished',
-      'AET': 'finished',
-      'PEN': 'finished',
-      'PST': 'postponed',
-      'CANC': 'cancelled',
-      'ABD': 'cancelled',
-      'AWD': 'finished',
-      'WO': 'finished',
-      'LIVE': 'live'
-    };
-    return map[s] || 'scheduled';
-  }
-
-  /**
-   * Fetch matches for a specific date from API-Football and normalize
-   */
-  async fetchMatchesByDateApiFootball(dateStr) {
-    try {
-      const date = dateStr || new Date().toISOString().split('T')[0];
-      console.log(`📅 [API-Football] Fetching fixtures for ${date}...`);
-
-      const data = await this.makeApiFootballRequest('/fixtures', { date });
-      const fixtures = Array.isArray(data?.response) ? data.response : [];
-
-      const matches = await Promise.all(
-        fixtures.map(async (fx) => {
-          const fixture = fx.fixture || {};
-          const league = fx.league || {};
-          const teams = fx.teams || {};
-          const goals = fx.goals || {};
-
-          // Build synthetic team objects compatible with getOrCreateTeam()
-          const homeTeamObj = {
-            id: teams.home?.id,
-            name: teams.home?.name,
-            shortName: teams.home?.name,
-            tla: null,
-            area: { name: league.country, code: null },
-            crest: teams.home?.logo
-          };
-          const awayTeamObj = {
-            id: teams.away?.id,
-            name: teams.away?.name,
-            shortName: teams.away?.name,
-            tla: null,
-            area: { name: league.country, code: null },
-            crest: teams.away?.logo
-          };
-
-          return {
-            // Prefix to avoid collision with Football-Data IDs
-            external_id: `af-${fixture.id}`,
-            home_team_id: await this.getOrCreateTeam(homeTeamObj),
-            away_team_id: await this.getOrCreateTeam(awayTeamObj),
-            competition_id: league.code || String(league.id || ''),
-            competition_name: league.name || 'Unknown',
-            match_date: new Date(fixture.date).toISOString(),
-            status: this.mapApiFootballStatus(fixture.status?.short),
-            home_score: typeof goals.home === 'number' ? goals.home : null,
-            away_score: typeof goals.away === 'number' ? goals.away : null,
-            venue: fixture.venue?.name || null,
-            referee: fixture.referee || null,
-            weather_conditions: null,
-            attendance: null,
-            match_week: league.round || null,
-            season: league.season ? String(league.season) : null
-          };
-        })
-      );
-
-      console.log(`✅ [API-Football] Fetched ${matches.length} fixtures for ${date}`);
-      return matches;
-    } catch (error) {
-      console.error(`❌ [API-Football] Error fetching fixtures for ${dateStr}:`, error.message);
-      // Return empty list on failure so other sources can still proceed
-      return [];
-    }
-  }
-
-  /**
-   * Fetch matches for a specific date from all sources and merge
-   */
-  async fetchMatchesByDateAllSources(dateStr) {
-    const fdMatches = await this.fetchMatchesByDate(dateStr).catch(() => []);
-    const afMatches = await this.fetchMatchesByDateApiFootball(dateStr).catch(() => []);
-
-    // Simple merge; IDs are namespaced (FD vs AF), so no conflict on upsert
-    const combined = [...fdMatches, ...afMatches];
-    console.log(`🔀 Combined matches for ${dateStr}: FD=${fdMatches.length}, AF=${afMatches.length}, Total=${combined.length}`);
-    return combined;
-  }
-
-  /**
-   * Check if we can make a request based on rate limits
-   */
-  canMakeRequest() {
-    const now = Date.now();
-    const timeSinceReset = now - this.lastReset;
     
-    // Reset counter every minute
-    if (timeSinceReset >= 60000) {
-      this.requestCount = 0;
-      this.lastReset = now;
-    }
-    
-    return this.requestCount < this.maxRequestsPerMinute;
+    // Configure axios instance for football-data.org
+    this.footballDataClient = axios.create({
+      baseURL: this.baseUrl,
+      headers: {
+        'X-Auth-Token': this.footballDataApiKey,
+        'Content-Type': 'application/json'
+      },
+      timeout: 10000 // 10 second timeout
+    });
   }
 
   /**
-   * Make a request to Football-Data.org API with rate limiting
-   */
-  async makeFootballDataRequest(endpoint) {
-    if (!this.canMakeRequest()) {
-      throw new Error('Rate limit exceeded. Please wait before making more requests.');
-    }
-
-    try {
-      const response = await axios.get(`${this.baseUrl}${endpoint}`, {
-        headers: {
-          'X-Auth-Token': this.footballDataApiKey,
-          'User-Agent': 'Hilites-App/1.0'
-        },
-        timeout: 10000
-      });
-
-      this.requestCount++;
-      return response.data;
-    } catch (error) {
-      console.error('Football-Data.org API error:', error.response?.data || error.message);
-      throw error;
-    }
-  }
-
-  /**
-   * Make a request to API-Football with rate limiting
-   */
-  async makeApiFootballRequest(endpoint, params = {}) {
-    try {
-      const response = await axios.get(`${this.apiFootballUrl}${endpoint}`, {
-        headers: {
-          'X-RapidAPI-Key': this.apiFootballKey,
-          'X-RapidAPI-Host': 'v3.football.api-sports.io'
-        },
-        params,
-        timeout: 10000
-      });
-
-      return response.data;
-    } catch (error) {
-      console.error('API-Football error:', error.response?.data || error.message);
-      throw error;
-    }
-  }
-
-  /**
-   * Fetch competitions from Football-Data.org
-   */
-  async fetchCompetitions() {
-    try {
-      console.log('🏆 Fetching competitions from Football-Data.org...');
-      const data = await this.makeFootballDataRequest('/competitions');
-      
-      const competitions = data.competitions.map(comp => ({
-        id: comp.code || comp.id.toString(),
-        name: comp.name,
-        type: this.mapCompetitionType(comp.type),
-        country: comp.area?.name || 'Unknown',
-        country_code: comp.area?.code || null,
-        logo_url: comp.emblem || null,
-        website_url: comp.website || null,
-        is_active: true,
-        current_season: comp.currentSeason?.startDate ? 
-          this.extractSeason(comp.currentSeason.startDate) : null,
-        start_date: comp.currentSeason?.startDate || null,
-        end_date: comp.currentSeason?.endDate || null
-      }));
-
-      console.log(`✅ Fetched ${competitions.length} competitions`);
-      return competitions;
-    } catch (error) {
-      console.error('❌ Error fetching competitions:', error.message);
-      throw error;
-    }
-  }
-
-  /**
-   * Fetch matches for a specific competition and date range
+   * Fetch matches from football-data.org API
+   * @param {string} competitionId - The competition ID (e.g., 'PL', 'CL')
+   * @param {Date} dateFrom - Start date for matches
+   * @param {Date} dateTo - End date for matches
+   * @returns {Promise<Array>} - Array of matches
    */
   async fetchMatches(competitionId, dateFrom, dateTo) {
     try {
-      console.log(`⚽ Fetching matches for competition ${competitionId} from ${dateFrom} to ${dateTo}...`);
-      
+      // Format dates as yyyy-MM-dd
+      const formatDate = (date) => {
+        const d = new Date(date);
+        return d.toISOString().split('T')[0];
+      };
+
+      const fromDate = formatDate(dateFrom);
+      const toDate = formatDate(dateTo);
+
+      console.log(`⚽ Fetching matches for competition ${competitionId} from ${fromDate} to ${toDate}...`);
+
       const data = await this.makeFootballDataRequest(
-        `/competitions/${competitionId}/matches?dateFrom=${dateFrom}&dateTo=${dateTo}`
+        `/competitions/${competitionId}/matches?dateFrom=${fromDate}&dateTo=${toDate}`
       );
-
-      const matches = await Promise.all(
-        data.matches.map(async (match) => ({
-          external_id: match.id.toString(),
-          home_team_id: await this.getOrCreateTeam(match.homeTeam),
-          away_team_id: await this.getOrCreateTeam(match.awayTeam),
-          competition_id: competitionId,
-          competition_name: match.competition?.name || 'Unknown',
-          match_date: new Date(match.utcDate).toISOString(),
-          status: this.mapMatchStatus(match.status),
-          home_score: match.score?.fullTime?.home || null,
-          away_score: match.score?.fullTime?.away || null,
-          venue: match.venue || null,
-          referee: match.referees?.[0]?.name || null,
-          weather_conditions: null, // Not available in Football-Data.org
-          attendance: match.attendance || null,
-          match_week: match.matchday || null,
-          season: this.extractSeason(match.season?.startDate)
-        }))
-      );
-
-      console.log(`✅ Fetched ${matches.length} matches`);
-      return matches;
+      
+      return data.matches || [];
     } catch (error) {
       console.error('❌ Error fetching matches:', error.message);
       throw error;
@@ -261,310 +60,69 @@ class MatchDataService {
   }
 
   /**
-   * Fetch today's matches across all competitions
+   * Make a request to Football-Data.org API with rate limiting and retry logic
    */
-  async fetchTodaysMatches() {
-    try {
-      const today = new Date().toISOString().split('T')[0];
-      console.log(`📅 Fetching today's matches (${today})...`);
+  async makeFootballDataRequest(endpoint, retryCount = 0) {
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY = 1000; // 1 second
 
-      const data = await this.makeFootballDataRequest(`/matches?date=${today}`);
-      
-      const matches = await Promise.all(
-        data.matches.map(async (match) => ({
-          external_id: match.id.toString(),
-          home_team_id: await this.getOrCreateTeam(match.homeTeam),
-          away_team_id: await this.getOrCreateTeam(match.awayTeam),
-          competition_id: match.competition?.code || match.competition?.id?.toString(),
-          competition_name: match.competition?.name || 'Unknown',
-          match_date: new Date(match.utcDate).toISOString(),
-          status: this.mapMatchStatus(match.status),
-          home_score: match.score?.fullTime?.home || null,
-          away_score: match.score?.fullTime?.away || null,
-          venue: match.venue || null,
-          referee: match.referees?.[0]?.name || null,
-          weather_conditions: null,
-          attendance: match.attendance || null,
-          match_week: match.matchday || null,
-          season: this.extractSeason(match.season?.startDate)
-        }))
-      );
-
-      console.log(`✅ Fetched ${matches.length} matches for today`);
-      return matches;
-    } catch (error) {
-      console.error('❌ Error fetching today\'s matches:', error.message);
-      throw error;
-    }
-  }
-
-  /**
-   * Fetch matches for a specific date (YYYY-MM-DD) across all competitions
-   */
-  async fetchMatchesByDate(dateStr) {
-    try {
-      const date = dateStr || new Date().toISOString().split('T')[0];
-      console.log(`📅 Fetching matches for ${date}...`);
-
-      const data = await this.makeFootballDataRequest(`/matches?date=${date}`);
-
-      const matches = await Promise.all(
-        data.matches.map(async (match) => ({
-          external_id: match.id.toString(),
-          home_team_id: await this.getOrCreateTeam(match.homeTeam),
-          away_team_id: await this.getOrCreateTeam(match.awayTeam),
-          competition_id: match.competition?.code || match.competition?.id?.toString(),
-          competition_name: match.competition?.name || 'Unknown',
-          match_date: new Date(match.utcDate).toISOString(),
-          status: this.mapMatchStatus(match.status),
-          home_score: match.score?.fullTime?.home || null,
-          away_score: match.score?.fullTime?.away || null,
-          venue: match.venue || null,
-          referee: match.referees?.[0]?.name || null,
-          weather_conditions: null,
-          attendance: match.attendance || null,
-          match_week: match.matchday || null,
-          season: this.extractSeason(match.season?.startDate)
-        }))
-      );
-
-      console.log(`✅ Fetched ${matches.length} matches for ${date}`);
-      return matches;
-    } catch (error) {
-      console.error(`❌ Error fetching matches for date ${dateStr}:`, error.message);
-      throw error;
-    }
-  }
-
-  /**
-   * Get or create a team in the database
-   */
-  async getOrCreateTeam(teamData) {
-    if (!teamData || !teamData.id) {
-      console.error('Invalid team data provided:', teamData);
-      return null;
-    }
-
-    const externalId = teamData.id.toString();
-    const teamName = teamData.name || 'Unknown Team';
-
-    try {
-      // First, try to find existing team by external_id
-      const { data: existingTeam, error: findError } = await this.supabase
-        .from('teams')
-        .select('id')
-        .eq('external_id', externalId)
-        .maybeSingle();
-
-      if (findError) {
-        console.error(`Error finding team ${teamName}:`, findError.message);
-        // Continue to try creating the team
+    // Wait if we're approaching rate limits
+    const now = Date.now();
+    if (this.requestCount >= this.maxRequestsPerMinute) {
+      const timeSinceReset = now - this.lastReset;
+      if (timeSinceReset < 60000) { // 1 minute in ms
+        const waitTime = 60000 - timeSinceReset + 1000; // Add 1 second buffer
+        console.log(`⚠️ Approaching rate limit. Waiting ${Math.ceil(waitTime/1000)} seconds...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+        this.requestCount = 0;
+        this.lastReset = Date.now();
       }
+    }
 
-      if (existingTeam) {
-        return existingTeam.id;
-      }
-
-      // Team not found, create new team
-      const newTeamData = {
-        external_id: externalId,
-        name: teamName,
-        short_name: teamData.shortName || teamData.name || teamName,
-        code: teamData.tla || null,
-        country: teamData.area?.name || 'Unknown',
-        country_code: teamData.area?.code || null,
-        league: 'Unknown', // Will be updated when we have more context
-        logo_url: teamData.crest || null,
-        website_url: teamData.website || null,
-        is_active: true
-      };
-
-      const { data: newTeam, error: createError } = await this.supabase
-        .from('teams')
-        .insert(newTeamData)
-        .select('id')
-        .maybeSingle();
-
-      if (createError) {
-        console.error(`Error creating team ${teamName}:`, createError);
-        
-        // If it's a unique constraint error, try to find the team again
-        // (it might have been created by another process)
-        if (createError.code === '23505') {
-          console.log(`Team ${teamName} already exists, fetching...`);
-          const { data: retryTeam, error: retryError } = await this.supabase
-            .from('teams')
-            .select('id')
-            .eq('external_id', externalId)
-            .maybeSingle();
-          
-          if (retryError) {
-            console.error(`Error retrying team fetch for ${teamName}:`, retryError.message);
-            return null;
-          }
-          
-          if (retryTeam) {
-            return retryTeam.id;
-          }
+    try {
+      const response = await this.footballDataClient.get(endpoint, {
+        timeout: 10000,
+        headers: {
+          'User-Agent': 'Hilites-App/1.0',
+          'Accept-Encoding': 'gzip, compress, deflate, br'
         }
-        
-        return null;
+      });
+
+      this.requestCount++;
+
+      // Log rate limit info
+      const remaining = response.headers['x-requests-available-minute'];
+      const reset = response.headers['x-requestcounter-reset'];
+      if (remaining) {
+        console.log(`ℹ️ Requests remaining this minute: ${remaining}, resets in ${reset || 'unknown'} seconds`);
       }
 
-      if (!newTeam) {
-        console.error(`Failed to create team ${teamName}: no data returned`);
-        return null;
-      }
+      return response.data;
 
-      console.log(`✅ Created new team: ${teamName} (ID: ${newTeam.id})`);
-      return newTeam.id;
     } catch (error) {
-      console.error(`Error in getOrCreateTeam for ${teamName}:`, error);
-      return null;
-    }
-  }
-
-  /**
-   * Store matches in the database
-   */
-  async storeMatches(matches) {
-    if (!matches || matches.length === 0) {
-      console.log('No matches to store');
-      return;
-    }
-
-    try {
-      console.log(`💾 Storing ${matches.length} matches in database...`);
-
-      const { data, error } = await this.supabase
-        .from('matches')
-        .upsert(matches, { 
-          onConflict: 'external_id',
-          ignoreDuplicates: false 
-        })
-        .select('id, external_id');
-
-      if (error) {
-        console.error('❌ Error storing matches:', error);
-        throw error;
+      // Handle rate limiting
+      if (error.response?.status === 429 && retryCount < MAX_RETRIES) {
+        const retryAfter = parseInt(error.response.headers['retry-after'] || '5', 10) * 1000;
+        console.warn(`⚠️ Rate limited. Retrying after ${retryAfter}ms... (Attempt ${retryCount + 1}/${MAX_RETRIES})`);
+        await new Promise(resolve => setTimeout(resolve, retryAfter));
+        return this.makeFootballDataRequest(endpoint, retryCount + 1);
       }
 
-      console.log(`✅ Successfully stored ${data.length} matches`);
-      return data;
-    } catch (error) {
-      console.error('❌ Error in storeMatches:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Store competitions in the database
-   */
-  async storeCompetitions(competitions) {
-    if (!competitions || competitions.length === 0) {
-      console.log('No competitions to store');
-      return;
-    }
-
-    try {
-      console.log(`💾 Storing ${competitions.length} competitions in database...`);
-
-      const { data, error } = await this.supabase
-        .from('competitions')
-        .upsert(competitions, { 
-          onConflict: 'id',
-          ignoreDuplicates: false 
-        })
-        .select('id, name');
-
-      if (error) {
-        console.error('❌ Error storing competitions:', error);
-        throw error;
+      // Log detailed error info
+      if (error.response) {
+        console.error('❌ Football-Data.org API error:', {
+          status: error.response.status,
+          statusText: error.response.statusText,
+          url: error.config?.url,
+          data: error.response.data,
+          headers: error.response.headers
+        });
+      } else if (error.request) {
+        console.error('❌ No response received from Football-Data.org:', error.request);
+      } else {
+        console.error('❌ Error setting up request to Football-Data.org:', error.message);
       }
 
-      console.log(`✅ Successfully stored ${data.length} competitions`);
-      return data;
-    } catch (error) {
-      console.error('❌ Error in storeCompetitions:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Map Football-Data.org competition type to our schema
-   */
-  mapCompetitionType(type) {
-    const typeMap = {
-      'LEAGUE': 'league',
-      'CUP': 'cup',
-      'INTERNATIONAL': 'international',
-      'FRIENDLY': 'friendly'
-    };
-    return typeMap[type] || 'league';
-  }
-
-  /**
-   * Map Football-Data.org match status to our schema
-   */
-  mapMatchStatus(status) {
-    const statusMap = {
-      'SCHEDULED': 'scheduled',
-      'TIMED': 'scheduled',
-      'IN_PLAY': 'live',
-      'PAUSED': 'live',
-      'FINISHED': 'finished',
-      'POSTPONED': 'postponed',
-      'CANCELLED': 'cancelled',
-      'SUSPENDED': 'postponed'
-    };
-    return statusMap[status] || 'scheduled';
-  }
-
-  /**
-   * Extract season from date (e.g., "2023-24")
-   */
-  extractSeason(startDate) {
-    if (!startDate) return null;
-    
-    const year = new Date(startDate).getFullYear();
-    const nextYear = year + 1;
-    return `${year}-${nextYear.toString().slice(-2)}`;
-  }
-
-  /**
-   * Get matches without highlights for AI processing
-   */
-  async getMatchesWithoutHighlights(limit = 50) {
-    try {
-      const { data, error } = await this.supabase
-        .from('matches')
-        .select(`
-          id,
-          external_id,
-          home_team_id,
-          away_team_id,
-          competition_name,
-          match_date,
-          status,
-          home_score,
-          away_score,
-          home_team:teams!matches_home_team_id_fkey(name),
-          away_team:teams!matches_away_team_id_fkey(name)
-        `)
-        .eq('status', 'finished')
-        .not('home_score', 'is', null)
-        .not('away_score', 'is', null)
-        .order('match_date', { ascending: false })
-        .limit(limit);
-
-      if (error) {
-        console.error('Error fetching matches without highlights:', error);
-        throw error;
-      }
-
-      return data || [];
-    } catch (error) {
-      console.error('Error in getMatchesWithoutHighlights:', error);
       throw error;
     }
   }

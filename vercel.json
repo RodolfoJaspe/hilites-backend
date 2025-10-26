@@ -12,6 +12,12 @@
       "dest": "server.js"
     }
   ],
+  "crons": [
+    {
+      "path": "/api/cron/fetch-matches",
+      "schedule": "*/10 * * * *"
+    }
+  ],
   "env": {
     "NODE_ENV": "production"
   }

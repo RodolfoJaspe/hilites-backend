@@ -1,5 +1,7 @@
 const MatchDataService = require('./matchDataService');
 const { createClient } = require('@supabase/supabase-js');
+const { format } = require('date-fns');
+const { utcToZonedTime } = require('date-fns-tz');
 
 // Initialize Supabase client
 const supabase = createClient(
@@ -11,336 +13,217 @@ class BackgroundProcessor {
   constructor() {
     this.matchDataService = new MatchDataService();
     this.isProcessing = false;
-    this.lastProcessed = null;
+    this.leaguesToFetch = [
+      { id: 'PL', name: 'Premier League' },
+      { id: 'PD', name: 'La Liga' },
+      { id: 'SA', name: 'Serie A' },
+      { id: 'BL1', name: 'Bundesliga' },
+      { id: 'FL1', name: 'Ligue 1' },
+      { id: 'CL', name: 'Champions League' },
+      { id: 'EL', name: 'Europa League' },
+    ];
   }
 
   /**
-   * Process new matches and fetch data from APIs
+   * Fetch and process matches for all configured leagues
    */
-  async processNewMatches() {
+  async fetchAndProcessMatches() {
     if (this.isProcessing) {
-      console.log('⏳ Background processing already in progress, skipping...');
+      console.log('⏳ Match fetching already in progress, skipping...');
       return;
     }
 
     this.isProcessing = true;
-    console.log('🚀 Starting background match processing...');
+    const startTime = new Date();
+    console.log('🚀 Starting match fetching process...');
 
     try {
-      // 1. Fetch and store today's matches
-      await this.fetchTodaysMatches();
+      // Process each league one by one to avoid rate limiting
+      for (const league of this.leaguesToFetch) {
+        try {
+          console.log(`📊 Fetching matches for ${league.name} (${league.id})`);
+          await this.processLeagueMatches(league.id);
+        } catch (error) {
+          console.error(`❌ Error processing ${league.name}:`, error.message);
+          // Continue with next league even if one fails
+        }
+      }
 
-      // 2. Update match scores for live/finished matches
-      await this.updateMatchScores();
-
-      // 3. Clean up old processing logs
-      await this.cleanupOldLogs();
-
-      this.lastProcessed = new Date();
-      console.log('✅ Background processing completed successfully');
-
+      this.lastProcessed = new Date().toISOString();
+      console.log(`✅ Match fetching completed in ${(new Date() - startTime) / 1000} seconds`);
     } catch (error) {
-      console.error('❌ Background processing error:', error);
-      throw error;
+      console.error('❌ Error in match fetching process:', error);
     } finally {
       this.isProcessing = false;
     }
   }
 
   /**
-   * Fetch today's matches from Football-Data.org
+   * Process matches for a specific league
+   * @param {string} leagueId - The ID of the league to process
+   * @returns {Promise<Array>} - Array of successfully processed matches
    */
-  async fetchTodaysMatches() {
+  async processLeagueMatches(leagueId) {
+    const leagueInfo = this.leaguesToFetch.find(l => l.id === leagueId) || { id: leagueId, name: leagueId };
+    const processedMatches = [];
+    
     try {
-      console.log('📅 Fetching today\'s matches...');
+      // Focus on today's matches
+      const today = new Date();
+      const dateFrom = new Date(today);
+      dateFrom.setHours(0, 0, 0, 0); // Start of today
       
-      // Prefer multi-source ingestion (Football-Data + API-Football),
-      // fallback to Football-Data-only if multi-source fails.
-      const today = new Date().toISOString().split('T')[0];
-      let todaysMatches = [];
+      const dateTo = new Date(today);
+      dateTo.setHours(23, 59, 59, 999); // End of today
+
+      console.log(`🔍 [${leagueInfo.name}] Fetching matches for ${dateFrom.toISOString().split('T')[0]}`);
+      
       try {
-        todaysMatches = await this.matchDataService.fetchMatchesByDateAllSources(today);
-      } catch (e) {
-        console.warn('⚠️ Multi-source fetch failed, falling back to Football-Data-only:', e.message);
-        todaysMatches = await this.matchDataService.fetchTodaysMatches();
-      }
+        const matches = await this.matchDataService.fetchMatches(leagueId, dateFrom, dateTo);
+        
+        if (!matches || matches.length === 0) {
+          console.log(`ℹ️ [${leagueInfo.name}] No matches found for today`);
+          return [];
+        }
 
-      if (todaysMatches.length > 0) {
-        await this.matchDataService.storeMatches(todaysMatches);
-        console.log(`✅ Stored ${todaysMatches.length} matches for today`);
+        console.log(`📥 [${leagueInfo.name}] Found ${matches.length} matches`);
+        
+        // Process each match
+        for (const match of matches) {
+          try {
+            const result = await this.processMatch(match);
+            if (result) {
+              processedMatches.push(result);
+            }
+          } catch (error) {
+            console.error(`❌ [${leagueInfo.name}] Error processing match ${match.id || 'unknown'}:`, error.message);
+            // Continue with next match even if one fails
+          }
+        }
+        
+        return processedMatches;
+        
+      } catch (error) {
+        // Handle API errors (like 403 for unauthorized competitions)
+        if (error.response?.status === 403) {
+          console.warn(`⚠️ [${leagueInfo.name}] Access denied. This league may require a different subscription plan.`);
+          return [];
+        }
+        throw error; // Re-throw other errors
+      }
+      
+    } catch (error) {
+      console.error(`❌ [${leagueInfo.name}] Error:`, error.message);
+      return []; // Return empty array on error to continue with other leagues
+    }
+  }
+
+  /**
+   * Process a single match and store it in the database
+   * @param {Object} match - The match data to process
+   * @returns {Promise<Object|null>} - The processed match or null if not processed
+   */
+  async processMatch(match) {
+    if (!match || !match.id) {
+      console.warn('⚠️ Invalid match data received:', match);
+      return null;
+    }
+
+    try {
+      // Check if match already exists
+      const { data: existingMatch, error: fetchError } = await supabase
+        .from('matches')
+        .select('id, status')
+        .eq('external_id', match.id)
+        .single();
+
+      const matchData = {
+        external_id: match.id,
+        home_team: match.home_team?.name || 'Unknown',
+        away_team: match.away_team?.name || 'Unknown',
+        home_score: match.score?.fullTime?.home ?? null,
+        away_score: match.score?.fullTime?.away ?? null,
+        match_date: new Date(match.utcDate).toISOString(),
+        status: match.status || 'SCHEDULED',
+        competition: match.competition?.name || 'Unknown',
+        competition_id: match.competition?.id || null,
+        matchday: match.matchday || null,
+        last_updated: new Date().toISOString()
+      };
+
+      if (existingMatch) {
+        // Only update if there are changes
+        const { data: updatedMatch, error: updateError } = await supabase
+          .from('matches')
+          .update(matchData)
+          .eq('id', existingMatch.id)
+          .select()
+          .single();
+
+        if (updateError) throw updateError;
+        
+        // Only log if status changed
+        if (existingMatch.status !== match.status) {
+          console.log(`🔄 Updated match ${match.id} (${matchData.home_team} vs ${matchData.away_team}) - Status: ${match.status}`);
+        }
+        return updatedMatch;
       } else {
-        console.log('ℹ️ No matches found for today');
-      }
+        // Insert new match
+        const { data: newMatch, error: insertError } = await supabase
+          .from('matches')
+          .insert([matchData])
+          .select()
+          .single();
 
+        if (insertError) throw insertError;
+        
+        console.log(`✅ Added new match: ${matchData.home_team} vs ${matchData.away_team} (${match.status})`);
+        return newMatch;
+      }
     } catch (error) {
-      console.error('❌ Error fetching today\'s matches:', error);
-      throw error;
+      console.error('❌ Error in processMatch:', error.message);
+      console.error('Match data:', JSON.stringify(match, null, 2));
+      return null;
     }
   }
 
   /**
-   * Update match scores for live and recently finished matches
+   * Process a team and store it in the database if it doesn't exist
    */
-  async updateMatchScores() {
+  async processTeam(teamData) {
+    if (!teamData || !teamData.id) return;
+
     try {
-      console.log('⚽ Updating match scores...');
+      const { data: existingTeam } = await supabase
+        .from('teams')
+        .select('id')
+        .eq('external_id', teamData.id)
+        .single();
 
-      // Get matches that are live or finished in the last 24 hours
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
+      if (!existingTeam) {
+        const { error } = await supabase
+          .from('teams')
+          .insert([{
+            external_id: teamData.id,
+            name: teamData.name,
+            short_name: teamData.shortName || teamData.name.substring(0, 3).toUpperCase(),
+            tla: teamData.tla || teamData.name.substring(0, 3).toUpperCase(),
+            crest_url: teamData.crest || teamData.crestUrl || null,
+            website: teamData.website || null,
+            founded: teamData.founded || null,
+            club_colors: teamData.clubColors || null,
+            venue: teamData.venue || null,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }]);
 
-      const { data: matchesToUpdate, error } = await supabase
-        .from('matches')
-        .select('id, external_id, status, match_date')
-        .in('status', ['live', 'finished'])
-        .gte('match_date', yesterday.toISOString())
-        .order('match_date', { ascending: false });
-
-      if (error) {
-        console.error('❌ Error fetching matches to update:', error);
-        return;
+        if (error) throw error;
+        console.log(`✅ Added new team: ${teamData.name}`);
       }
-
-      if (!matchesToUpdate || matchesToUpdate.length === 0) {
-        console.log('ℹ️ No matches need score updates');
-        return;
-      }
-
-      console.log(`🔄 Updating scores for ${matchesToUpdate.length} matches`);
-
-      // For each match, fetch updated data
-      for (const match of matchesToUpdate) {
-        try {
-          await this.updateSingleMatch(match.external_id);
-          // Add small delay to respect rate limits
-          await this.delay(1000);
-        } catch (error) {
-          console.error(`❌ Error updating match ${match.external_id}:`, error.message);
-        }
-      }
-
-      console.log('✅ Match score updates completed');
-
     } catch (error) {
-      console.error('❌ Error in updateMatchScores:', error);
-      throw error;
+      console.error(`❌ Error processing team ${teamData.id || 'unknown'}:`, error.message);
     }
-  }
-
-  /**
-   * Update a single match by external ID
-   */
-  async updateSingleMatch(externalId) {
-    try {
-      // Fetch match data from Football-Data.org
-      const matchData = await this.matchDataService.makeFootballDataRequest(`/matches/${externalId}`);
-      
-      if (!matchData) {
-        console.log(`⚠️ No data found for match ${externalId}`);
-        return;
-      }
-
-      const updatedMatch = {
-        status: this.matchDataService.mapMatchStatus(matchData.status),
-        home_score: matchData.score?.fullTime?.home || null,
-        away_score: matchData.score?.fullTime?.away || null,
-        venue: matchData.venue || null,
-        referee: matchData.referees?.[0]?.name || null,
-        attendance: matchData.attendance || null
-      };
-
-      // Update the match in database
-      const { error } = await supabase
-        .from('matches')
-        .update(updatedMatch)
-        .eq('external_id', externalId);
-
-      if (error) {
-        console.error(`❌ Error updating match ${externalId}:`, error);
-        throw error;
-      }
-
-      console.log(`✅ Updated match ${externalId}: ${updatedMatch.status}`);
-
-    } catch (error) {
-      console.error(`❌ Error updating single match ${externalId}:`, error);
-      throw error;
-    }
-  }
-
-  /**
-   * Get matches that need AI processing for highlights
-   */
-  async getMatchesForAIProcessing(limit = 10) {
-    try {
-      console.log(`🤖 Getting ${limit} matches for AI processing...`);
-
-      const matches = await this.matchDataService.getMatchesWithoutHighlights(limit);
-      
-      console.log(`✅ Found ${matches.length} matches for AI processing`);
-      return matches;
-
-    } catch (error) {
-      console.error('❌ Error getting matches for AI processing:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Log AI processing activity
-   */
-  async logAIProcessing(matchId, processingType, status, inputData = null, outputData = null, errorMessage = null) {
-    try {
-      const { error } = await supabase
-        .from('ai_processing_logs')
-        .insert({
-          match_id: matchId,
-          processing_type: processingType,
-          status: status,
-          input_data: inputData,
-          output_data: outputData,
-          error_message: errorMessage,
-          processing_time_ms: null, // Will be calculated when completed
-          retry_count: 0
-        });
-
-      if (error) {
-        console.error('❌ Error logging AI processing:', error);
-        throw error;
-      }
-
-    } catch (error) {
-      console.error('❌ Error in logAIProcessing:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Update AI processing log with completion status
-   */
-  async updateAIProcessingLog(logId, status, outputData = null, errorMessage = null, processingTimeMs = null) {
-    try {
-      const updateData = {
-        status: status,
-        completed_at: status === 'completed' ? new Date().toISOString() : null
-      };
-
-      if (outputData) updateData.output_data = outputData;
-      if (errorMessage) updateData.error_message = errorMessage;
-      if (processingTimeMs) updateData.processing_time_ms = processingTimeMs;
-
-      const { error } = await supabase
-        .from('ai_processing_logs')
-        .update(updateData)
-        .eq('id', logId);
-
-      if (error) {
-        console.error('❌ Error updating AI processing log:', error);
-        throw error;
-      }
-
-    } catch (error) {
-      console.error('❌ Error in updateAIProcessingLog:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Clean up old processing logs
-   */
-  async cleanupOldLogs(daysToKeep = 30) {
-    try {
-      console.log(`🧹 Cleaning up processing logs older than ${daysToKeep} days...`);
-
-      const cutoffDate = new Date();
-      cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
-
-      const { data, error } = await supabase
-        .from('ai_processing_logs')
-        .delete()
-        .lt('created_at', cutoffDate.toISOString())
-        .in('status', ['completed', 'failed']);
-
-      if (error) {
-        console.error('❌ Error cleaning up logs:', error);
-        throw error;
-      }
-
-      console.log(`✅ Cleaned up old processing logs`);
-
-    } catch (error) {
-      console.error('❌ Error in cleanupOldLogs:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Get processing statistics
-   */
-  async getProcessingStats() {
-    try {
-      const { data: stats, error } = await supabase
-        .from('ai_processing_logs')
-        .select('status, processing_type')
-        .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()); // Last 24 hours
-
-      if (error) {
-        console.error('❌ Error fetching processing stats:', error);
-        throw error;
-      }
-
-      const statsSummary = {
-        total_processed: stats.length,
-        completed: stats.filter(s => s.status === 'completed').length,
-        failed: stats.filter(s => s.status === 'failed').length,
-        pending: stats.filter(s => s.status === 'pending').length,
-        processing: stats.filter(s => s.status === 'processing').length,
-        by_type: {}
-      };
-
-      // Group by processing type
-      stats.forEach(stat => {
-        if (!statsSummary.by_type[stat.processing_type]) {
-          statsSummary.by_type[stat.processing_type] = {
-            total: 0,
-            completed: 0,
-            failed: 0
-          };
-        }
-        statsSummary.by_type[stat.processing_type].total++;
-        if (stat.status === 'completed') statsSummary.by_type[stat.processing_type].completed++;
-        if (stat.status === 'failed') statsSummary.by_type[stat.processing_type].failed++;
-      });
-
-      return statsSummary;
-
-    } catch (error) {
-      console.error('❌ Error in getProcessingStats:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Utility function to add delay
-   */
-  delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
-
-  /**
-   * Get processor status
-   */
-  getStatus() {
-    return {
-      is_processing: this.isProcessing,
-      last_processed: this.lastProcessed,
-      uptime: process.uptime()
-    };
   }
 }
 
 module.exports = BackgroundProcessor;
-
-
-
-

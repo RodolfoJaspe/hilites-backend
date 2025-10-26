@@ -6,23 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "seed:teams": "node scripts/seed-comprehensive-teams.js",
-    "seed:teams:api": "node scripts/seed-teams.js",
-    "test:highlights": "node scripts/test-highlights.js",
-    "test:match-data": "node scripts/test-match-data.js",
-    "test:ai-discovery": "node scripts/test-ai-discovery.js",
-    "test:multi-source": "node scripts/test-multi-source.js",
-    "fix:teams": "node scripts/fix-teams.js",
-    "fix:logos": "node scripts/fix-team-logos.js",
-    "add:champions-league": "node scripts/add-champions-league.js",
-    "add:la-liga": "node scripts/add-la-liga.js",
-    "fix:la-liga": "node scripts/fix-la-liga-matches.js",
-    "add:remaining-leagues": "node scripts/add-remaining-leagues.js",
-    "add:europa-league": "node scripts/add-europa-league.js",
-    "add:europa-league-ai": "node scripts/add-europa-league-ai.js",
-    "add:europa-league-langchain": "node scripts/add-europa-league-langchain.js",
-    "add:recent-europa-league": "node scripts/add-recent-europa-league.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "fetch:matches": "node scripts/fetch-matches.js"
   },
   "keywords": [
     "soccer",
@@ -41,12 +26,14 @@
     "axios": "^1.12.2",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
+    "date-fns-tz": "^3.2.0",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "express-rate-limit": "^7.1.5",
     "helmet": "^7.1.0",
     "joi": "^17.11.0",
-    "langchain": "^0.3.35"
+    "langchain": "^0.3.35",
+    "node-cron": "^4.2.1"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"
