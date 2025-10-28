@@ -23,28 +23,49 @@ const backgroundIntervalMs = parseInt(process.env.BACKGROUND_INTERVAL_MS || '300
 // Security middleware
 app.use(helmet());
 
+
+// Make sure this comes before any route handlers
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  next();
+});
+
 // CORS configuration
-app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? ['https://hilites.vercel.app'] 
-    : ['http://localhost:3000', 'http://localhost:5001'],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: [
-    'Content-Type', 
-    'Authorization', 
-    'X-Requested-With',
-    'Accept',
-    'Origin',
-    'Access-Control-Allow-Origin'
-  ],
-  exposedHeaders: ['Content-Range', 'X-Total-Count'],
-  optionsSuccessStatus: 200,
-  preflightContinue: false
-}));
+const allowedOrigins = [
+  'https://hilites.vercel.app',
+  'http://localhost:3000',
+  'http://localhost:5001'
+];
 
 // Handle preflight requests
-app.options('*', cors());
+app.options('*', cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'Access-Control-Allow-Origin'],
+  exposedHeaders: ['Content-Range', 'X-Total-Count'],
+  maxAge: 600
+}));
+
+// Regular CORS handling
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Access-Control-Allow-Origin');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Range, X-Total-Count');
+  next();
+});
 
 // Rate limiting - More lenient for development
 const limiter = rateLimit({
