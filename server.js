@@ -27,12 +27,24 @@ app.use(helmet());
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' 
     ? ['https://hilites.vercel.app'] 
-    : ['http://localhost:3000'],
+    : ['http://localhost:3000', 'http://localhost:5001'],
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  optionsSuccessStatus: 200 // For legacy browser support
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: [
+    'Content-Type', 
+    'Authorization', 
+    'X-Requested-With',
+    'Accept',
+    'Origin',
+    'Access-Control-Allow-Origin'
+  ],
+  exposedHeaders: ['Content-Range', 'X-Total-Count'],
+  optionsSuccessStatus: 200,
+  preflightContinue: false
 }));
+
+// Handle preflight requests
+app.options('*', cors());
 
 // Rate limiting - More lenient for development
 const limiter = rateLimit({
@@ -88,6 +100,8 @@ app.use('/api/highlights', highlightsRoutes);
 app.use('/api/matches', matchesRoutes);
 app.use('/api/ai-discovery', aiDiscoveryRoutes);
 app.use('/api/favorite-teams', favoriteTeamsRoutes);
+app.use('/api/cron', require('./routes/cron'));
+
 
 // Background processing status endpoint (optional lightweight health for processor)
 app.get('/api/background/status', (req, res) => {
