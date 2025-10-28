@@ -60,6 +60,26 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Test endpoint for manual match fetching
+app.get('/api/test-fetch-matches', async (req, res) => {
+  try {
+    console.log('🚀 [TEST] Manually triggering match fetch...');
+    await backgroundProcessor.fetchAndProcessMatches();
+    res.json({ 
+      success: true, 
+      message: 'Manual match fetch completed successfully',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ [TEST] Error in manual match fetch:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/preferences', preferencesRoutes);
@@ -104,9 +124,29 @@ app.use((error, req, res, next) => {
 // Initialize background processor
 const backgroundProcessor = new BackgroundProcessor();
 
+// Test endpoint for manual match fetching
+app.get('/api/test-fetch-matches', async (req, res) => {
+  try {
+    console.log('🚀 [TEST] Manually triggering match fetch...');
+    await backgroundProcessor.fetchAndProcessMatches();
+    res.json({ 
+      success: true, 
+      message: 'Manual match fetch completed successfully',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ [TEST] Error in manual match fetch:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // Start regular background processing
 const backgroundInterval = setInterval(() => {
-  backgroundProcessor.processNewMatches().catch(console.error);
+  backgroundProcessor.fetchAndProcessMatches().catch(console.error);
 }, backgroundIntervalMs);
 
 // Schedule match fetching every 10 minutes
@@ -149,6 +189,27 @@ const scheduleDailyTask = () => {
     timezone: 'America/New_York',
     name: 'process-finished-matches'
   });};
+
+// Test endpoint for manual triggering
+app.get('/api/test-fetch-matches', async (req, res) => {
+  try {
+    const backgroundProcessor = new (require('./services/backgroundProcessor'))();
+    console.log('🔄 [TEST] Manually triggering match fetch...');
+    await backgroundProcessor.fetchAndProcessMatches();
+    res.json({ 
+      success: true, 
+      message: 'Manual match fetch completed successfully',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ [TEST] Error in manual match fetch:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
 
 // Start the server
 app.listen(port, () => {

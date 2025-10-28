@@ -130,25 +130,57 @@ class BackgroundProcessor {
     }
 
     try {
+      // Process home team
+      const homeTeam = await this.processTeam(match.homeTeam);
+      if (!homeTeam) {
+        console.warn(`⚠️ Failed to process home team for match ${match.id}`);
+        return null;
+      }
+
+      // Process away team
+      const awayTeam = await this.processTeam(match.awayTeam);
+      if (!awayTeam) {
+        console.warn(`⚠️ Failed to process away team for match ${match.id}`);
+        return null;
+      }
+
       // Check if match already exists
       const { data: existingMatch, error: fetchError } = await supabase
         .from('matches')
-        .select('id, status')
+        .select('id, status, is_highlight_processed')
         .eq('external_id', match.id)
         .single();
 
+      // Determine match status based on the API response
+      let status = 'SCHEDULED';
+      if (match.status === 'FINISHED') {
+        status = 'COMPLETED';
+      } else if (match.status === 'IN_PLAY' || match.status === 'PAUSED') {
+        status = 'LIVE';
+      } else if (match.status === 'POSTPONED' || match.status === 'SUSPENDED') {
+        status = 'POSTPONED';
+      } else if (match.status === 'CANCELLED') {
+        status = 'CANCELLED';
+      }
+
       const matchData = {
         external_id: match.id,
-        home_team: match.home_team?.name || 'Unknown',
-        away_team: match.away_team?.name || 'Unknown',
+        home_team_id: homeTeam.id,
+        home_team_name: homeTeam.name,
+        away_team_id: awayTeam.id,
+        away_team_name: awayTeam.name,
         home_score: match.score?.fullTime?.home ?? null,
         away_score: match.score?.fullTime?.away ?? null,
         match_date: new Date(match.utcDate).toISOString(),
-        status: match.status || 'SCHEDULED',
+        status: status,
         competition: match.competition?.name || 'Unknown',
         competition_id: match.competition?.id || null,
+        external_competition_id: match.competition?.id?.toString() || null,
         matchday: match.matchday || null,
-        last_updated: new Date().toISOString()
+        last_updated: new Date().toISOString(),
+        venue: match.venue || null,
+        referee: match.referees?.[0]?.name || null,
+        is_highlight_processed: existingMatch?.is_highlight_processed || false
       };
 
       if (existingMatch) {
@@ -190,25 +222,41 @@ class BackgroundProcessor {
   /**
    * Process a team and store it in the database if it doesn't exist
    */
+  /**
+   * Process a team and store it in the database if it doesn't exist
+   * @param {Object} teamData - The team data to process
+   * @returns {Promise<Object>} - The processed team data
+   */
   async processTeam(teamData) {
-    if (!teamData || !teamData.id) return;
+    if (!teamData || !teamData.id) {
+      console.warn('⚠️ Invalid team data received:', teamData);
+      return null;
+    }
 
     try {
-      const { data: existingTeam } = await supabase
+      // Normalize team data
+      const teamName = teamData.name || 'Unknown Team';
+      const shortName = teamData.shortName || teamData.tla || teamName.substring(0, 3).toUpperCase();
+      const tla = teamData.tla || teamData.shortName || teamName.substring(0, 3).toUpperCase();
+      const crestUrl = teamData.crest || teamData.crestUrl || teamData.crestUrl || null;
+
+      // Check if team already exists
+      let { data: existingTeam, error: fetchError } = await supabase
         .from('teams')
-        .select('id')
-        .eq('external_id', teamData.id)
+        .select('id, name, short_name, tla')
+        .eq('external_id', teamData.id.toString())
         .single();
 
       if (!existingTeam) {
-        const { error } = await supabase
+        // Team doesn't exist, create it
+        const { data: newTeam, error: insertError } = await supabase
           .from('teams')
           .insert([{
-            external_id: teamData.id,
-            name: teamData.name,
-            short_name: teamData.shortName || teamData.name.substring(0, 3).toUpperCase(),
-            tla: teamData.tla || teamData.name.substring(0, 3).toUpperCase(),
-            crest_url: teamData.crest || teamData.crestUrl || null,
+            external_id: teamData.id.toString(),
+            name: teamName,
+            short_name: shortName,
+            tla: tla,
+            crest_url: crestUrl,
             website: teamData.website || null,
             founded: teamData.founded || null,
             club_colors: teamData.clubColors || null,
