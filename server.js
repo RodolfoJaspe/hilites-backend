@@ -31,39 +31,30 @@ app.use((req, res, next) => {
   next();
 });
 
-// CORS configuration
-const allowedOrigins = [
-  'https://hilites.vercel.app',
-  'http://localhost:3000',
-  'http://localhost:5001'
-];
-
-// Handle preflight requests
-app.options('*', cors({
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'Access-Control-Allow-Origin'],
-  exposedHeaders: ['Content-Range', 'X-Total-Count'],
-  maxAge: 600
-}));
-
-// Regular CORS handling
+// Enable CORS for all routes
 app.use((req, res, next) => {
+  const allowedOrigins = [
+    'https://hilites.vercel.app',
+    'http://localhost:3000',
+    'http://localhost:5001'
+  ];
+  
   const origin = req.headers.origin;
   if (allowedOrigins.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
   }
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Access-Control-Allow-Origin');
+  
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours
+    return res.status(200).end();
+  }
+  
+  // For non-preflight requests
   res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Expose-Headers', 'Content-Range, X-Total-Count');
   next();
 });
 
