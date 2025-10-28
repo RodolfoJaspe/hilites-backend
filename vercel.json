@@ -23,7 +23,7 @@
   "crons": [
     {
       "path": "/api/cron/fetch-matches",
-      "schedule": "*/10 * * * *"
+      "schedule": "0 3 * * *"
     }
   ],
   "env": {
